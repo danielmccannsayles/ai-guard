@@ -97,23 +97,35 @@ async function main() {
   // denyRead/denyWrite on protected paths still takes precedence over allowWrite.
   const home = homedir();
   const tmp = tmpdir();
+  // macOS: /tmp → /private/tmp, /var → /private/var. The sandbox operates on
+  // resolved paths, so both forms must be in the allow list.
   const defaultAllowWrite = [
     home,
     tmp,
     "/tmp",
-    "/private/tmp", // macOS: /tmp → /private/tmp
+    "/private/tmp",
+    "/var/folders", // macOS temp dirs (os.tmpdir() resolves under here)
+    "/private/var/folders",
   ];
   const allowWrite = rawConfig.allowWritePaths
     ? rawConfig.allowWritePaths.map(expandPath)
     : defaultAllowWrite;
   const config = {
-    network: {},
+    network: {
+      // (deny default) blocks all XPC/mach services except a hardcoded allowlist.
+      // TUI apps need more: keychain (analyticsd, SecurityServer), file watching
+      // (FSEvents), preferences, trustd (TLS). Allow all — we're restricting
+      // file access, not IPC.
+      allowMachLookup: ["*"],
+    },
     filesystem: {
       denyRead: protectedPaths,
       denyWrite: protectedPaths,
       allowRead: [],
       allowWrite,
     },
+    // TUI apps need raw mode on stdin (setRawMode ioctl on /dev/ttys*).
+    allowPty: true,
   };
 
   await SandboxManager.initialize(config);

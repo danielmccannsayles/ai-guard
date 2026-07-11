@@ -74,15 +74,27 @@ async function main() {
   const { SandboxManager } = await import(srtPath);
 
   // network: {} → no allowedDomains key → no network restriction (allow all)
-  // This is the key insight: omitting allowedDomains entirely skips the proxy,
-  // while empty arrays would block all network.
+  // omitting allowedDomains entirely skips the proxy (empty arrays = block all)
+  //
+  // filesystem: the sandbox uses deny-all-except-allow for writes.
+  // (deny default) blocks all writes, then allowWrite re-enables specific paths.
+  // Without allowWrite, the agent can't write to ~/.claude, the project dir, /tmp, etc.
+  // We allow $HOME (covers ~/.claude, ~/.pi, project dirs under ~/Desktop/coding, etc.),
+  // /tmp (and /private/tmp — macOS symlink), and /var/folders (macOS temp dirs).
+  // denyRead/denyWrite on protected paths still applies (deny takes precedence over allow).
+  const home = homedir();
   const config = {
     network: {},
     filesystem: {
       denyRead: protectedPaths,
       denyWrite: protectedPaths,
       allowRead: [],
-      allowWrite: [],
+      allowWrite: [
+        home,           // ~/.claude, ~/.pi, ~/Desktop/coding/*, etc.
+        '/tmp',
+        '/private/tmp',
+        '/var/folders',  // macOS temp dirs
+      ],
     },
   };
 

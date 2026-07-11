@@ -1,51 +1,21 @@
 #!/usr/bin/env node
-// ai-guard sandbox — wraps a command in @anthropic-ai/sandbox-runtime
+// ai-guard sandbox — wraps a command in a macOS Seatbelt sandbox.
 //
-// Blocks file reads/writes to protected paths at the kernel level (macOS Seatbelt).
-// Network is unrestricted. Works with any command (claude, pi, etc.).
+// Blocks file reads/writes to protected paths at the kernel level (EPERM on open()).
+// Everything else is allowed: network, keychain, TTY, mach IPC, sysctls.
+// Uses a raw SBPL profile with (allow default) + deny specific paths, instead of
+// the sandbox-runtime's (deny default) + allow specific paths. This is simpler and
+// doesn't break keychain, TCC, or other system services that check for sandboxing.
 //
 // Usage: ai-guard-sandbox <command> [args...]
 // Config: ~/.config/ai-guard/sandbox.json ({ "protectedPaths": ["~/path/..."] })
 
-import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { spawn } from "node:child_process";
-import { resolve, join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import { join } from "node:path";
 
 const CONFIG_PATH = join(homedir(), ".config", "ai-guard", "sandbox.json");
-
-// Resolve @anthropic-ai/sandbox-runtime from the local node_modules (pinned)
-function resolveSrt() {
-  const candidates = [
-    // Local install (pinned lockfile, SHA-512 verified)
-    join(
-      __dirname,
-      "node_modules",
-      "@anthropic-ai",
-      "sandbox-runtime",
-      "dist",
-      "index.js",
-    ),
-    // Global install (fallback)
-    join(
-      execSync("npm root -g", { encoding: "utf8" }).trim(),
-      "@anthropic-ai",
-      "sandbox-runtime",
-      "dist",
-      "index.js",
-    ),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-  console.error("ai-guard: @anthropic-ai/sandbox-runtime not found.");
-  console.error("  Run the install script: ./install.sh");
-  process.exit(1);
-}
 
 // Expand ~ in paths
 function expandPath(p) {
@@ -74,73 +44,43 @@ function loadConfig() {
     process.exit(1);
   }
 
-  return { protectedPaths: paths, rawConfig: raw };
+  return paths;
 }
 
-async function main() {
+// Build an SBPL profile that denies reads/writes to protected paths.
+// (allow default) permits everything; the deny rules carve out protected paths.
+// macOS resolves symlinks before matching, so /tmp → /private/tmp is handled
+// automatically — deny the real path.
+function buildProfile(protectedPaths) {
+  const lines = [
+    "(version 1)",
+    "(allow default)",
+  ];
+
+  for (const p of protectedPaths) {
+    lines.push(
+      `(deny file-read* (subpath "${p}"))`,
+      `(deny file-write* (subpath "${p}"))`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function main() {
   const command = process.argv.slice(2);
   if (command.length === 0) {
     console.error("Usage: ai-guard-sandbox <command> [args...]");
     process.exit(1);
   }
 
-  const { protectedPaths, rawConfig } = loadConfig();
-  const srtPath = resolveSrt();
-  const { SandboxManager } = await import(srtPath);
+  const protectedPaths = loadConfig();
+  const profile = buildProfile(protectedPaths);
 
-  // network: {} → no allowedDomains key → no network restriction (allow all)
-  // omitting allowedDomains entirely skips the proxy (empty arrays = block all)
-  //
-  // filesystem: the sandbox uses deny-all-except-allow for writes.
-  // (deny default) blocks all writes, then allowWrite re-enables specific paths.
-  // Defaults: $HOME (agent config, project dirs) + temp dirs.
-  // denyRead/denyWrite on protected paths still takes precedence over allowWrite.
-  const home = homedir();
-  const tmp = tmpdir();
-  // macOS: /tmp → /private/tmp, /var → /private/var. The sandbox operates on
-  // resolved paths, so both forms must be in the allow list.
-  const defaultAllowWrite = [
-    home,
-    tmp,
-    "/tmp",
-    "/private/tmp",
-    "/var/folders", // macOS temp dirs (os.tmpdir() resolves under here)
-    "/private/var/folders",
-  ];
-  const allowWrite = rawConfig.allowWritePaths
-    ? rawConfig.allowWritePaths.map(expandPath)
-    : defaultAllowWrite;
-  const config = {
-    network: {
-      // (deny default) blocks all XPC/mach services except a hardcoded allowlist.
-      // TUI apps need more: keychain (analyticsd, SecurityServer), file watching
-      // (FSEvents), preferences, trustd (TLS). Allow all — we're restricting
-      // file access, not IPC.
-      allowMachLookup: ["*"],
-    },
-    filesystem: {
-      denyRead: protectedPaths,
-      denyWrite: protectedPaths,
-      allowRead: [],
-      allowWrite,
-    },
-    // TUI apps need raw mode on stdin (setRawMode ioctl on /dev/ttys*).
-    allowPty: true,
-  };
-
-  await SandboxManager.initialize(config);
-
-  const commandStr = command
-    .map((arg) => {
-      if (/^[\w./=-]+$/.test(arg)) return arg;
-      return `'${arg.replace(/'/g, "'\\''")}'`;
-    })
-    .join(" ");
-
-  const wrapped = await SandboxManager.wrapWithSandbox(commandStr);
-
-  const child = spawn(wrapped, {
-    shell: true,
+  // sandbox-exec -p '<profile>' -- <command>
+  // The profile is passed as a single argument. sandbox-exec runs the command
+  // inside the sandbox. stdio is inherited so TUI apps work normally.
+  const child = spawn("/usr/bin/sandbox-exec", ["-p", profile, ...command], {
     stdio: "inherit",
   });
 
@@ -159,7 +99,4 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  console.error(`ai-guard: ${err.message}`);
-  process.exit(1);
-});
+main();

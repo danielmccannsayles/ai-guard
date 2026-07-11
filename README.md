@@ -2,9 +2,9 @@
 
 Protects your system from AI agents. Two layers:
 
-1. **Git guard** — prevents agents from committing/pushing to protected repos. Uses an env var (`AGENT_FLAG_*`) set by the agent's extension, checked by global git hooks (`pre-commit`, `pre-push`). Cooperative protocol: agents tag themselves, hooks check voluntarily.
+1. **Git guard** — prevents agents from committing/pushing to protected repos. Uses an env var (`AGENT_FLAG_*`) set by the agent's extension, checked by global git hooks. Cooperative protocol: agents tag themselves, hooks check voluntarily.
 
-2. **File sandbox** — prevents agents from reading protected paths (secrets, memory, configs). Wraps the entire agent process in [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime), which uses macOS Seatbelt (`sandbox-exec`) for kernel-level `open()` denial. No pattern matching — `cat`, `python3`, `node`, everything gets `EPERM`.
+2. **File sandbox** — prevents agents from reading protected paths (secrets, memory, configs). Wraps the agent process in a macOS Seatbelt sandbox using `sandbox-exec`. Kernel-level `open()` denial — `cat`, `python3`, `node`, everything gets `EPERM`. No pattern matching, no bypass.
 
 ## How it works
 
@@ -20,22 +20,19 @@ To add a new agent: set `AGENT_FLAG_5dcb696f6215=<name>` in the agent's environm
 
 ### File sandbox
 
-The sandbox wrapper (`sandbox/sandbox.mjs`) initializes `@anthropic-ai/sandbox-runtime` with deny-read/deny-write paths from `~/.config/ai-guard/sandbox.json`, then spawns the wrapped command inside a Seatbelt sandbox.
+The sandbox wrapper (`sandbox/sandbox.mjs`) generates a Seatbelt profile that denies reads/writes to protected paths, then runs the command via `sandbox-exec -p`:
 
 ```
 ai-guard-sandbox claude
-└─ sandbox-exec (kernel-level)
-   ├─ deny file-read*  (protected paths)
-   ├─ deny file-write* (protected paths)
-   └─ allow network*   (unrestricted)
+└─ sandbox-exec -p '(allow default) (deny file-read* ...)'
    └─ claude
-      ├─ Bash tool  → sandboxed
-      ├─ Read tool  → sandboxed (open() returns EPERM)
-      ├─ Edit tool  → sandboxed
+      ├─ Bash tool  → sandboxed (EPERM on protected paths)
+      ├─ Read tool  → sandboxed (EPERM on protected paths)
+      ├─ Edit tool  → sandboxed (EPERM on protected paths)
       └─ MCP servers → sandboxed
 ```
 
-Network is unrestricted — the sandbox only blocks file access to protected paths. This covers the threat model (agent reading files it shouldn't) without the complexity of domain allowlists.
+Everything except file access to protected paths is allowed: network, keychain, TTY, mach IPC. The profile is `(allow default)` with deny rules for each protected path — simple and complete.
 
 ## Install
 
@@ -45,15 +42,7 @@ cd ai-guard
 ./install.sh
 ```
 
-Requires:
-- macOS (uses `sandbox-exec` / Seatbelt)
-- Node.js ≥ 20.11
-
-The install script:
-- Runs `npm ci` to install `@anthropic-ai/sandbox-runtime` from the pinned lockfile (`package-lock.json` contains SHA-512 integrity hashes, verified on install)
-- Symlinks git hooks to `~/.config/git/hooks/` and sets `core.hooksPath`
-- Symlinks the sandbox wrapper to `~/.local/bin/ai-guard-sandbox`
-- Copies default config to `~/.config/ai-guard/` (existing config is preserved)
+Requires macOS (uses `sandbox-exec` / Seatbelt).
 
 Then add aliases to your shell config:
 
@@ -76,49 +65,21 @@ Protected repos — agents can't commit or push here. One path per line, `~` exp
 
 ### `~/.config/ai-guard/sandbox.json`
 
-Protected paths — agents can't read or write these. Paths are added to both `denyRead` and `denyWrite`.
+Protected paths — agents can't read or write these.
 
 ```json
 {
-  "protectedPaths": [
-    "~/secrets",
-    "~/agent-config/memory"
-  ]
+  "protectedPaths": ["~/secrets", "~/agent-config/memory"]
 }
 ```
 
-Optional `allowWritePaths` — paths the agent can write to. Defaults to `$HOME`, `os.tmpdir()`, `/tmp`, and `/private/tmp` (macOS). Override if your project dirs are outside `$HOME`:
+## Why not Claude Code's built-in `/sandbox`?
 
-```json
-{
-  "protectedPaths": ["~/secrets"],
-  "allowWritePaths": ["~", "/tmp", "/workspace"]
-}
-```
-```
+Claude's `/sandbox` only wraps the **Bash tool**. The Read/Edit/Write tools run in the Claude process itself, unsandboxed. `ai-guard-sandbox` wraps the entire process — every tool, every MCP server, every hook. And it works with any agent (pi, Codex), not just Claude.
 
-## Why not just use Claude Code's built-in `/sandbox`?
+## Why not permissions.deny?
 
-Claude's `/sandbox` only wraps the **Bash tool**. The Read/Edit/Write tools run in the Claude process itself, unsandboxed. `ai-guard-sandbox` wraps the entire process — every tool, every MCP server, every hook. One mechanism, not two. And it works with any agent (pi, Codex), not just Claude.
-
-Both use the same `@anthropic-ai/sandbox-runtime` library under the hood.
-
-## Why not just use permissions.deny?
-
-Claude Code's `permissions.deny` (e.g. `Read(**/secrets/**)`) is pattern matching on tool invocations. It can be bypassed: `python3 -c "open('secret').read()"` via the Bash tool, or an MCP server reading files directly. The sandbox is kernel-level — the `open()` syscall itself returns `EPERM`, regardless of what process or technique tried to read the file.
-
-## Updating sandbox-runtime
-
-The version is pinned in `package.json`. To update:
-
-```bash
-cd ai-guard
-npm install @anthropic-ai/sandbox-runtime@latest   # or @0.0.66
-git add package.json package-lock.json
-git commit -m "Bump sandbox-runtime to 0.0.66"
-```
-
-The lockfile pins every transitive dependency with integrity hashes. `npm ci` verifies them on install.
+Claude Code's `permissions.deny` (e.g. `Read(**/secrets/**)`) is pattern matching on tool invocations. It can be bypassed: `python3 -c "open('secret').read()"` via the Bash tool, or an MCP server reading files directly. The sandbox is kernel-level — the `open()` syscall itself returns `EPERM`.
 
 ## License
 

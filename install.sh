@@ -1,5 +1,5 @@
 #!/bin/bash
-# ai-guard install — sets up git hooks + sandbox wrapper
+# ai-guard install — Sets up git hooks + sandbox wrapper
 #
 # Installs:
 #   - Git hooks (pre-commit, pre-push) → ~/.config/git/hooks/ (via core.hooksPath)
@@ -19,53 +19,34 @@ echo "ai-guard install"
 echo "================"
 echo ""
 
-# 1. Install pinned sandbox-runtime from local lockfile (SHA-512 verified)
-echo "Installing @anthropic-ai/sandbox-runtime from pinned lockfile..."
-npm ci --omit=dev 2>&1 | tail -1
-echo "✓ sandbox-runtime installed (pinned)"
+mkdir -p "$AI_GUARD_DIR" "$GIT_HOOKS_DIR" "$LOCAL_BIN"
 
-# 2. Create config directory
-mkdir -p "$AI_GUARD_DIR"
-mkdir -p "$GIT_HOOKS_DIR"
-mkdir -p "$LOCAL_BIN"
-
-# 3. Install git hooks (symlink — updates propagate from the repo)
+# Git hooks
 chmod +x "$REPO_DIR/git-guard/hook.sh"
 ln -sf "$REPO_DIR/git-guard/hook.sh" "$GIT_HOOKS_DIR/pre-commit"
 ln -sf "$REPO_DIR/git-guard/hook.sh" "$GIT_HOOKS_DIR/pre-push"
+git config --global core.hooksPath "$GIT_HOOKS_DIR"
 echo "✓ git hooks → $GIT_HOOKS_DIR/"
 
-# 4. Set global git hooks path
-git config --global core.hooksPath "$GIT_HOOKS_DIR"
-echo "✓ git core.hooksPath = $GIT_HOOKS_DIR"
+# Default config (don't overwrite existing)
+for f in repos.txt sandbox.json; do
+  src="$REPO_DIR/git-guard/repos.default.txt"
+  [ "$f" = "sandbox.json" ] && src="$REPO_DIR/sandbox/default-config.json"
+  if [ ! -f "$AI_GUARD_DIR/$f" ]; then
+    cp "$src" "$AI_GUARD_DIR/$f"
+    echo "✓ created $AI_GUARD_DIR/$f"
+  else
+    echo "✓ $AI_GUARD_DIR/$f already exists (kept)"
+  fi
+done
 
-# 5. Install default config (don't overwrite existing)
-if [ ! -f "$AI_GUARD_DIR/repos.txt" ]; then
-  cp "$REPO_DIR/git-guard/repos.default.txt" "$AI_GUARD_DIR/repos.txt"
-  echo "✓ created $AI_GUARD_DIR/repos.txt"
-else
-  echo "✓ $AI_GUARD_DIR/repos.txt already exists (kept)"
-fi
-
-if [ ! -f "$AI_GUARD_DIR/sandbox.json" ]; then
-  cp "$REPO_DIR/sandbox/default-config.json" "$AI_GUARD_DIR/sandbox.json"
-  echo "✓ created $AI_GUARD_DIR/sandbox.json"
-else
-  echo "✓ $AI_GUARD_DIR/sandbox.json already exists (kept)"
-fi
-
-# 6. Install sandbox wrapper
+# Sandbox wrapper
 chmod +x "$REPO_DIR/sandbox/sandbox.mjs"
 ln -sf "$REPO_DIR/sandbox/sandbox.mjs" "$LOCAL_BIN/ai-guard-sandbox"
 echo "✓ ai-guard-sandbox → $LOCAL_BIN/"
 
 echo ""
-echo "Done. To sandbox an agent, run it through ai-guard-sandbox:"
-echo ""
-echo "  ai-guard-sandbox claude"
-echo "  ai-guard-sandbox pi"
-echo ""
-echo "Or add aliases to your shell config:"
+echo "Done. Add aliases to your shell config:"
 echo ""
 echo "  alias claude='ai-guard-sandbox claude'"
 echo "  alias pi='ai-guard-sandbox pi'"

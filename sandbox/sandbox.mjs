@@ -57,9 +57,13 @@ function buildProfile(protectedPaths) {
     "(allow default)",
   ];
 
+  // Deny file-read-data (content + directory listing) but allow file-read-metadata
+  // (stat, lstat). This lets git status stat files without reading their contents.
+  // git may warn about directories it can't list, but exit code and output are correct.
+  // file-write* is fully denied (no writes to protected paths).
   for (const p of protectedPaths) {
     lines.push(
-      `(deny file-read* (subpath "${p}"))`,
+      `(deny file-read-data (subpath "${p}"))`,
       `(deny file-write* (subpath "${p}"))`,
     );
   }

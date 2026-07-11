@@ -87,6 +87,16 @@ Protected paths — agents can't read or write these. Paths are added to both `d
 }
 ```
 
+Optional `allowWritePaths` — paths the agent can write to. Defaults to `$HOME`, `os.tmpdir()`, `/tmp`, and `/private/tmp` (macOS). Override if your project dirs are outside `$HOME`:
+
+```json
+{
+  "protectedPaths": ["~/secrets"],
+  "allowWritePaths": ["~", "/tmp", "/workspace"]
+}
+```
+```
+
 ## Why not just use Claude Code's built-in `/sandbox`?
 
 Claude's `/sandbox` only wraps the **Bash tool**. The Read/Edit/Write tools run in the Claude process itself, unsandboxed. `ai-guard-sandbox` wraps the entire process — every tool, every MCP server, every hook. One mechanism, not two. And it works with any agent (pi, Codex), not just Claude.

@@ -11,24 +11,27 @@ import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const CONFIG_PATH = join(homedir(), '.config', 'ai-guard', 'sandbox.json');
 
-// Resolve @anthropic-ai/sandbox-runtime from the global npm install
+// Resolve @anthropic-ai/sandbox-runtime from the local node_modules (pinned)
 function resolveSrt() {
-  try {
-    const globalRoot = execSync('npm root -g', { encoding: 'utf8' }).trim();
-    const srtPath = join(globalRoot, '@anthropic-ai', 'sandbox-runtime', 'dist', 'index.js');
-    if (!existsSync(srtPath)) {
-      throw new Error('not found at ' + srtPath);
-    }
-    return srtPath;
-  } catch (e) {
-    console.error('ai-guard: @anthropic-ai/sandbox-runtime not found.');
-    console.error('  Install it with: npm install -g @anthropic-ai/sandbox-runtime');
-    process.exit(1);
+  const candidates = [
+    // Local install (pinned lockfile, SHA-512 verified)
+    join(__dirname, 'node_modules', '@anthropic-ai', 'sandbox-runtime', 'dist', 'index.js'),
+    // Global install (fallback)
+    join(execSync('npm root -g', { encoding: 'utf8' }).trim(), '@anthropic-ai', 'sandbox-runtime', 'dist', 'index.js'),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
   }
+  console.error('ai-guard: @anthropic-ai/sandbox-runtime not found.');
+  console.error('  Run the install script: ./install.sh');
+  process.exit(1);
 }
 
 // Expand ~ in paths

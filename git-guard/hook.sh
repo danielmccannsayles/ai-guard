@@ -7,8 +7,8 @@
 # Scope: only blocks in repos listed in ~/.config/ai-guard/repos.txt.
 #
 # This is a cooperative protocol. Agents set the env var voluntarily;
-# this hook checks it voluntarily. Daniel (interactive terminal) never
-# has AGENT_FLAG_* set, so he's never blocked.
+# this hook checks it voluntarily. A human at the terminal never
+# has AGENT_FLAG_* set, so they're never blocked.
 
 # Check if any AGENT_FLAG_* env var is set
 agent_flag=$(env | grep '^AGENT_FLAG_' | head -1)

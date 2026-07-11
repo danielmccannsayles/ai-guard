@@ -19,12 +19,10 @@ echo "ai-guard install"
 echo "================"
 echo ""
 
-# 1. Check @anthropic-ai/sandbox-runtime (for sandbox wrapper)
-if ! npm list -g @anthropic-ai/sandbox-runtime >/dev/null 2>&1; then
-  echo "Installing @anthropic-ai/sandbox-runtime..."
-  npm install -g @anthropic-ai/sandbox-runtime
-fi
-echo "✓ sandbox-runtime available"
+# 1. Install pinned sandbox-runtime from local lockfile (SHA-512 verified)
+echo "Installing @anthropic-ai/sandbox-runtime from pinned lockfile..."
+npm ci --omit=dev 2>&1 | tail -1
+echo "✓ sandbox-runtime installed (pinned)"
 
 # 2. Create config directory
 mkdir -p "$AI_GUARD_DIR"

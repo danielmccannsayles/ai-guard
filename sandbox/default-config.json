@@ -1,0 +1,7 @@
+{
+  "protectedPaths": [
+    "~/agents/pi/agent/memory",
+    "~/agents/fragments/encrypted",
+    "~/agents/pi/agent/extensions"
+  ]
+}

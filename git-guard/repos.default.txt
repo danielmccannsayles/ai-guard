@@ -1,0 +1,4 @@
+# Protected repos — AI agents cannot commit or push here.
+# One path per line. ~ is expanded to $HOME.
+# Lines starting with # are comments. Blank lines are ignored.
+~/agents

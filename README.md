@@ -1,5 +1,5 @@
-> [!CAUTION] Not extensively reviewed or tested.
-> The sandbox uses macOS `sandbox-exec` with `(allow default)` (fail-open) — it blocks file access to protected paths but does not restrict network, process execution, or other operations. See [How it works](#how-it-works) for details.
+> [!CAUTION]
+> Not extensively reviewed or tested. The sandbox uses macOS `sandbox-exec` with `(allow default)` (fail-open). It blocks file access to protected paths but does not restrict network, process execution, or other operations.
 
 # ai-guard
 

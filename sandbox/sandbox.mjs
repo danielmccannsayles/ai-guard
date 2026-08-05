@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ai-guard sandbox — wraps a command in a macOS Seatbelt sandbox.
+// information-guard sandbox — wraps a command in a macOS Seatbelt sandbox.
 //
 // Blocks file reads/writes to protected paths at the kernel level (EPERM on open()).
 // Everything else is allowed: network, keychain, TTY, mach IPC, sysctls.
@@ -7,15 +7,15 @@
 // the sandbox-runtime's (deny default) + allow specific paths. This is simpler and
 // doesn't break keychain, TCC, or other system services that check for sandboxing.
 //
-// Usage: ai-guard-sandbox <command> [args...]
-// Config: ~/.config/ai-guard/sandbox.json ({ "protectedPaths": ["~/path/..."] })
+// Usage: information-guard-sandbox <command> [args...]
+// Config: ~/.config/information-guard/sandbox.json ({ "protectedPaths": ["~/path/..."] })
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 
-const CONFIG_PATH = join(homedir(), ".config", "ai-guard", "sandbox.json");
+const CONFIG_PATH = join(homedir(), ".config", "information-guard", "sandbox.json");
 
 // Expand ~ in paths
 function expandPath(p) {
@@ -24,12 +24,12 @@ function expandPath(p) {
   return p;
 }
 
-// Load config from ~/.config/ai-guard/sandbox.json
+// Load config from ~/.config/information-guard/sandbox.json
 function loadConfig() {
   if (!existsSync(CONFIG_PATH)) {
-    console.error(`ai-guard: No config found at ${CONFIG_PATH}`);
+    console.error(`information-guard: No config found at ${CONFIG_PATH}`);
     console.error("  Run the install script or create it with:");
-    console.error(`    mkdir -p ~/.config/ai-guard`);
+    console.error(`    mkdir -p ~/.config/information-guard`);
     console.error(
       `    echo '{"protectedPaths":["~/secrets"]}' > ${CONFIG_PATH}`,
     );
@@ -40,7 +40,7 @@ function loadConfig() {
   const paths = (raw.protectedPaths || []).map(expandPath);
 
   if (paths.length === 0) {
-    console.error("ai-guard: No protectedPaths in config. Nothing to sandbox.");
+    console.error("information-guard: No protectedPaths in config. Nothing to sandbox.");
     process.exit(1);
   }
 
@@ -74,7 +74,7 @@ function buildProfile(protectedPaths) {
 function main() {
   const command = process.argv.slice(2);
   if (command.length === 0) {
-    console.error("Usage: ai-guard-sandbox <command> [args...]");
+    console.error("Usage: information-guard-sandbox <command> [args...]");
     process.exit(1);
   }
 
@@ -91,14 +91,14 @@ function main() {
   child.on("exit", (code, signal) => {
     if (signal) {
       if (signal === "SIGINT" || signal === "SIGTERM") process.exit(0);
-      console.error(`ai-guard: process killed by signal: ${signal}`);
+      console.error(`information-guard: process killed by signal: ${signal}`);
       process.exit(1);
     }
     process.exit(code ?? 0);
   });
 
   child.on("error", (err) => {
-    console.error(`ai-guard: ${err.message}`);
+    console.error(`information-guard: ${err.message}`);
     process.exit(1);
   });
 }

@@ -2,7 +2,9 @@
   "protectedPaths": [
     "~/agents/pi/agent/memory",
     "~/agents/fragments/encrypted",
-    "~/agents/pi/agent/extensions"
+    "~/agents/pi/agent/extensions",
+    "~/agents/pi/agent/sessions",
+    "~/agents/remember"
   ],
   "writeContainment": {
     "enabled": true,

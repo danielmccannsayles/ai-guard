@@ -146,6 +146,8 @@ extends = ":workspace"
 "~/agents/pi/agent/memory" = "deny"
 "~/agents/fragments/encrypted" = "deny"
 "~/agents/pi/agent/extensions" = "deny"
+"~/agents/pi/agent/sessions" = "deny"
+"~/agents/remember" = "deny"
 ```
 
 Only the read-denies need syncing — Codex's `:workspace` base already contains writes to the workspace (and disables network for sandboxed commands; add `[permissions.information-guard.network]` with `enabled = true` and `domains = { "*" = "allow" }` if you want Codex to match information-guard's open-network posture).

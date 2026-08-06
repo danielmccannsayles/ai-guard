@@ -3,5 +3,9 @@
     "~/agents/pi/agent/memory",
     "~/agents/fragments/encrypted",
     "~/agents/pi/agent/extensions"
-  ]
+  ],
+  "writeContainment": {
+    "enabled": true,
+    "allowWrite": []
+  }
 }

@@ -1,5 +1,5 @@
 > [!CAUTION]
-> Not extensively reviewed or tested. The sandbox uses macOS `sandbox-exec` with `(allow default)` (fail-open). It blocks file access to protected paths but does not restrict network, process execution, or other operations.
+> Not extensively reviewed or tested. The sandbox uses macOS `sandbox-exec` with `(allow default)` (fail-open). It restricts file reads, and can be configured to prevent writes, but doesn't touch network, process execution, or other operations.
 
 # information-guard
 
@@ -7,7 +7,10 @@ Protects your system from AI agents, with two layers:
 
 1. **Git guard** — prevents agents from committing/pushing to protected repos. Uses an env var (`AGENT_FLAG`) set by the agent's extension, checked by global git hooks.
 
-2. **File sandbox** — prevents agents from reading protected paths with Kernel-level `open()` denial, using macOS Seatbelt sandboxing.
+2. **File sandbox** — a whole-process macOS Seatbelt sandbox. A sandbox can restrict three things: **reads**, **writes**, and **network**. This one does the first two:
+   - **Reads** — protected paths are unreadable at the kernel level (EPERM on `open()`). The core feature: your private data stays private.
+   - **Writes** (on by default) — denied outside the workspace, temp dirs, and tool state dirs. Catastrophic-mistake protection: `rm -rf ~` dies on the first visible file.
+   - **Network** — untouched, deliberately. This is the trade you make vs other sandboxes; see [the comparison](#compared-to-other-sandboxes) below.
 
 ## How it works
 
@@ -27,7 +30,7 @@ The sandbox wrapper (`sandbox/sandbox.mjs`) generates a Seatbelt profile that de
 
 ```
 information-guard-sandbox claude
-└─ sandbox-exec -p '(allow default) (deny file-read* ...)'
+└─ sandbox-exec -p '(allow default) + write containment + protected-path denies'
    └─ claude
       ├─ Bash tool  → sandboxed (EPERM on protected paths)
       ├─ Read tool  → sandboxed (EPERM on protected paths)
@@ -35,7 +38,22 @@ information-guard-sandbox claude
       └─ MCP servers → sandboxed
 ```
 
-Everything except file access to protected paths is allowed: network, keychain, TTY, mach IPC. The profile is `(allow default)` with deny rules for each protected path.
+Network, keychain, TTY, and mach IPC are all untouched. The profile is `(allow default)` with deny rules for each protected path, plus the write containment below.
+
+### Write containment
+
+On by default (`writeContainment.enabled` in the config), the profile denies all writes except:
+
+- the **workspace** — the directory the agent was launched from (note: launch from `~` and your whole home directory is the workspace)
+- temp dirs (`$TMPDIR` and its per-user parent, `/private/tmp`) and `/dev`
+- **home-root dotfiles** (`~/.claude`, `~/.codex`, `~/.npm`, ...) — the heuristic that avoids per-agent allowlists: hidden files at the root of home are tool state, visible files are your data. Any agent's state keeps working with zero configuration; `rm -rf ~` dies on the first visible file. Symlinked dotfiles are resolved at launch (Seatbelt matches resolved paths), so `~/.claude → ~/agents/claude` works.
+- your configured `allowWrite` paths (escape hatch, usually empty)
+
+Minus a short deny list of universally-sensitive dotfiles that wins over the dotfile allow: `~/.ssh`, `~/.gitconfig` + `~/.config/git` (git-guard integrity), `~/.config/information-guard` (this guard's config), and shell startup files. Sensitive dotfiles are stable across agents and years; agent state dirs churn — hence deny-list the former, heuristic-allow the latter.
+
+Protected-path denies are emitted last, so a protected dir inside an allowed root stays blocked (SBPL: later rules win). This gives you Codex-style "read the computer, only mutate the project" semantics while leaving network and everything else untouched.
+
+Debug with `information-guard-sandbox --print-profile`, and run the test matrix with `sandbox/test-containment.sh` (from a normal terminal — Seatbelt doesn't nest, so it refuses to run inside a wrapped session).
 
 ## Install
 
@@ -66,13 +84,34 @@ Set protected repos (no git push & commit) and paths (no read/write)
 
 ```json
 {
-  "protectedPaths": ["~/secrets", "~/agent-config/memory"]
+  "protectedPaths": ["~/secrets", "~/agent-config/memory"],
+  "writeContainment": {
+    "enabled": true,
+    "allowWrite": []
+  }
 }
 ```
 
+Omit `writeContainment` (or set `enabled: false`) for protected-paths-only behavior. `allowWrite` is an escape hatch for tools whose state lives outside home-root dotfiles. Override the config location with `$INFORMATION_GUARD_CONFIG`.
+
+## Compared to other sandboxes
+
+On the reads / writes / network axes:
+
+|                                 | reads                | writes              | network               |
+| ------------------------------- | -------------------- | ------------------- | --------------------- |
+| **information-guard**           | deny protected paths | workspace-contained | untouched             |
+| Claude Code `/sandbox`          | Bash tool only       | Bash tool only      | Bash tool only        |
+| `@anthropic-ai/sandbox-runtime` | deny paths           | workspace-contained | mandatory allowlist   |
+| Codex (workspace-write)         | deny paths           | workspace-contained | off, or allowlist/`*` |
+
 ### Why not Claude Code's built-in `/sandbox`?
 
-Claude's `/sandbox` only wraps the **Bash tool**. The Read/Edit/Write tools run in the Claude process itself, unsandboxed.
+Claude's `/sandbox` only wraps the **Bash tool**. The Read/Edit/Write tools, MCP servers, and hooks run in the Claude process itself, unsandboxed. It's also off by default.
+
+### Why not sandbox-runtime?
+
+`npx @anthropic-ai/sandbox-runtime claude` wraps the whole process like information-guard does, and adds network control — but the network config is a mandatory allowlist that rejects `*` as "overly broad". There is no way to say "leave the network alone"; you must enumerate every domain the agent may touch, and unlisted domains are blocked silently. If that ceremony is worth it to you, use it. Switching from sandbox-runtime to information-guard, the only thing you lose is network restriction — reads and writes are covered comparably.
 
 ### Why not permissions.deny?
 
@@ -80,7 +119,29 @@ Claude Code's `permissions.deny` (e.g. `Read(**/secrets/**)`) is pattern matchin
 
 ### Codex / other sandboxed tools
 
-Apple sandboxes do not nest. If you're using e.g. Codex, which has it's own apple sandbox, you should just add your configuration directly to Codex's sandbox.
+Apple sandboxes do not nest. If you're using e.g. Codex, which has its own apple sandbox, add your configuration directly to Codex's sandbox instead of wrapping it. To keep `sandbox.json` the single source of truth, generate the Codex profile from it:
+
+```bash
+information-guard-sandbox --print-codex-config
+```
+
+```toml
+# Generated by information-guard from ~/.config/information-guard/sandbox.json
+# Paste into ~/.codex/config.toml. Re-run after changing protectedPaths.
+
+default_permissions = "information-guard"
+
+[permissions.information-guard]
+description = "Workspace-write with deny-read on information-guard protected paths."
+extends = ":workspace"
+
+[permissions.information-guard.filesystem]
+"~/agents/pi/agent/memory" = "deny"
+"~/agents/fragments/encrypted" = "deny"
+"~/agents/pi/agent/extensions" = "deny"
+```
+
+Only the read-denies need syncing — Codex's `:workspace` base already contains writes to the workspace (and disables network for sandboxed commands; add `[permissions.information-guard.network]` with `enabled = true` and `domains = { "*" = "allow" }` if you want Codex to match information-guard's open-network posture).
 
 ## License
 

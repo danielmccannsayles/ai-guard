@@ -104,6 +104,21 @@ fi
 echo "untouched surfaces:"
 expect_allowed "network (curl example.com)"      "$WS" curl -sS -m 10 https://example.com -o /dev/null
 
+echo "profiles (keyed by command basename):"
+cat > "$INFORMATION_GUARD_CONFIG" <<EOF
+{
+  "protectedPaths": ["$WORK/protected"],
+  "writeContainment": { "enabled": true, "allowWrite": [] },
+  "profiles": {
+    "cat": { "protectedPaths": [] },
+    "touch": { "protectedPaths": [] }
+  }
+}
+EOF
+expect_allowed "profiled command reads protected (profile drops read-denies)" "$WS" cat "$WORK/protected/secret.txt"
+expect_blocked "profiled command still write-contained (inherits containment)" "$WS" touch "$WORK/outside3.txt"
+expect_blocked "unprofiled command still read-blocked (default profile)"       "$WS" sh -c "cat '$WORK/protected/secret.txt'"
+
 echo "containment off (protected paths only):"
 cat > "$INFORMATION_GUARD_CONFIG" <<EOF
 {

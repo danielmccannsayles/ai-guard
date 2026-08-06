@@ -22,11 +22,15 @@
 // workspace stays blocked).
 //
 // Usage: information-guard-sandbox <command> [args...]
-//        information-guard-sandbox --print-profile        (show the generated SBPL and exit)
-//        information-guard-sandbox --print-codex-config   (emit a codex permissions profile
-//                                                          from the same config, to paste into
-//                                                          ~/.codex/config.toml — codex has its
-//                                                          own Seatbelt sandbox; don't wrap it)
+//        information-guard-sandbox --print-profile [name]      (show the generated SBPL and exit)
+//        information-guard-sandbox --print-codex-config [name] (emit a codex permissions profile
+//                                                               from the same config, to paste into
+//                                                               ~/.codex/config.toml — codex has its
+//                                                               own Seatbelt sandbox; don't wrap it)
+//
+// The wrapped command's basename selects a profile from `profiles` in the
+// config (if one matches), so per-agent behavior needs nothing in the alias:
+// `information-guard-sandbox pi` uses profiles.pi.
 // Config: ~/.config/information-guard/sandbox.json (override with $INFORMATION_GUARD_CONFIG)
 //   {
 //     "protectedPaths": ["~/path/..."],
@@ -41,7 +45,7 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 
 const CONFIG_PATH =
   process.env.INFORMATION_GUARD_CONFIG ||
@@ -112,8 +116,14 @@ function dotfileSymlinkTargets() {
   return targets;
 }
 
-// Load config from ~/.config/information-guard/sandbox.json
-function loadConfig() {
+// Load config from ~/.config/information-guard/sandbox.json.
+//
+// Profiles: the top-level config is the default. `profiles.<name>` overrides
+// it for commands whose basename matches <name> — a key present in the
+// profile replaces the top-level value, a key absent is inherited. So
+// `"profiles": { "pi": { "protectedPaths": [] } }` gives pi the same write
+// containment but no read-denies.
+function loadConfig(profileName) {
   if (!existsSync(CONFIG_PATH)) {
     console.error(`information-guard: No config found at ${CONFIG_PATH}`);
     console.error("  Run the install script or create it with:");
@@ -125,10 +135,25 @@ function loadConfig() {
   }
 
   const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
-  const protectedPaths = (raw.protectedPaths || []).map(expandPath);
+  let cfg = raw;
+  const profile = profileName ? raw.profiles?.[profileName] : undefined;
+  if (profile) {
+    cfg = {
+      protectedPaths:
+        "protectedPaths" in profile
+          ? profile.protectedPaths
+          : raw.protectedPaths,
+      writeContainment:
+        "writeContainment" in profile
+          ? profile.writeContainment
+          : raw.writeContainment,
+    };
+  }
+
+  const protectedPaths = (cfg.protectedPaths || []).map(expandPath);
   const containment = {
-    enabled: raw.writeContainment?.enabled === true,
-    allowWrite: (raw.writeContainment?.allowWrite || []).map(expandPath),
+    enabled: cfg.writeContainment?.enabled === true,
+    allowWrite: (cfg.writeContainment?.allowWrite || []).map(expandPath),
   };
 
   if (protectedPaths.length === 0 && !containment.enabled) {
@@ -202,7 +227,12 @@ function main() {
     process.exit(1);
   }
 
-  const { protectedPaths, containment } = loadConfig();
+  // Profile selection: the wrapped command's basename (information-guard-sandbox
+  // pi → profile "pi"). For the --print-* flags, an optional trailing arg names
+  // the profile (--print-profile pi).
+  const isPrintFlag = command[0].startsWith("--print-");
+  const profileName = isPrintFlag ? command[1] : basename(command[0]);
+  const { protectedPaths, containment } = loadConfig(profileName);
   const profile = buildProfile(protectedPaths, containment);
 
   if (command[0] === "--print-profile") {

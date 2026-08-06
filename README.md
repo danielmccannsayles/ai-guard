@@ -69,6 +69,8 @@ alias claude='information-guard-sandbox claude'
 alias pi='information-guard-sandbox pi'
 ```
 
+The wrapped command's basename selects a profile from the config (`profiles.pi` for the second alias), so per-agent behavior needs nothing in the alias — see Config.
+
 ## Config
 
 Set protected repos (no git push & commit) and paths (no read/write)
@@ -88,11 +90,16 @@ Set protected repos (no git push & commit) and paths (no read/write)
   "writeContainment": {
     "enabled": true,
     "allowWrite": []
+  },
+  "profiles": {
+    "pi": { "protectedPaths": [] }
   }
 }
 ```
 
-Omit `writeContainment` (or set `enabled: false`) for protected-paths-only behavior. `allowWrite` is an escape hatch for tools whose state lives outside home-root dotfiles. Override the config location with `$INFORMATION_GUARD_CONFIG`.
+Omit `writeContainment` (or set `enabled: false`) for protected-paths-only behavior. `allowWrite` is an escape hatch for tools whose state lives outside home-root dotfiles.
+
+**Profiles**: the top-level config is the default; `profiles.<name>` applies to commands whose basename matches `<name>`. A key present in the profile replaces the top-level value; a key absent is inherited. The example above gives pi full read access while keeping write containment — a trusted agent still gets catastrophe protection. (`$INFORMATION_GUARD_CONFIG` overrides the config file location entirely, mostly for testing.)
 
 ## Compared to other sandboxes
 

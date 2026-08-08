@@ -49,7 +49,7 @@ On by default (`writeContainment.enabled` in the config), the profile denies all
 - **home-root dotfiles** (`~/.claude`, `~/.codex`, `~/.npm`, ...) — the heuristic that avoids per-agent allowlists: hidden files at the root of home are tool state, visible files are your data. Any agent's state keeps working with zero configuration; `rm -rf ~` dies on the first visible file. Symlinked dotfiles are resolved at launch (Seatbelt matches resolved paths), so `~/.claude → ~/agents/claude` works.
 - your configured `allowWrite` paths (escape hatch, usually empty)
 
-Minus a short deny list of universally-sensitive dotfiles that wins over the dotfile allow: `~/.ssh`, `~/.gitconfig` + `~/.config/git` (git-guard integrity), `~/.config/information-guard` (this guard's config), and shell startup files. Sensitive dotfiles are stable across agents and years; agent state dirs churn — hence deny-list the former, heuristic-allow the latter.
+Minus a deny list of sensitive dotfiles that wins over the dotfile allow: shell startup files (`~/.zshrc`, `~/.bashrc`, `~/.profile`, ...), credentials (`~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`, `~/.docker`, `~/.config/gh`, `~/.tinfoil`), git integrity (`~/.gitconfig`, `~/.config/git`), the guard's own config (`~/.config/information-guard`), and PATH executables (`~/.local/bin`, `~/.cargo/bin`, `~/.nvm`, `~/.pyenv`, ...). These are write-denied only — agents can still read/exec them (e.g. run `node` from `~/.nvm`), just not modify them. For read-protection, add paths to `protectedPaths` in the config instead. Sensitive dotfiles are stable across agents and years; agent state dirs churn — hence deny-list the former, heuristic-allow the latter.
 
 Protected-path denies are emitted last, so a protected dir inside an allowed root stays blocked (SBPL: later rules win). This gives you Codex-style "read the computer, only mutate the project" semantics while leaving network and everything else untouched.
 
@@ -62,6 +62,8 @@ _Requires macOS (uses `sandbox-exec` / Seatbelt)._
 ```bash
 ./install.sh
 ```
+
+Copies `sandbox.mjs` and `hook.sh` into `~/.config/information-guard/` and `~/.config/git/hooks/` (both write-denied by the sandbox), then symlinks `~/.local/bin/information-guard-sandbox` to the copied `sandbox.mjs`. The repo source stays a dev copy — edits are inert until you re-run `install.sh` from a human terminal. Re-run it after updating the repo.
 
 ```bash
 # ~/.zshrc

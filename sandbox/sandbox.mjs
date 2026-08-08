@@ -9,7 +9,8 @@
 //        - temp dirs and /dev
 //        - home-root dotfiles (~/.claude, ~/.codex, ~/.npm, ...) — agent and
 //          tool state, agent-agnostic, no per-agent allowlist to maintain —
-//          minus a short deny list of universally-sensitive dotfiles
+//          minus a deny list of sensitive dotfiles (credentials, shell
+//          startup, PATH executables, the guard's own config)
 //        - configured allowWrite paths (escape hatch for weird tools)
 //      Mirrors codex's workspace-write sandbox: the agent can read the
 //      computer but only mutate the project it was launched in.
@@ -37,10 +38,12 @@
 //     "writeContainment": { "enabled": true, "allowWrite": [] }
 //   }
 //
-// Known hole: the guard does not defend its own source. An agent working in
-// the information-guard repo can edit sandbox.mjs (it's the workspace), and the edit
-// takes effect on the next launch. The config and git hooks are write-denied,
-// but the wrapper source is only as safe as the repos you point agents at.
+// install.sh copies this source to ~/.config/information-guard/sandbox.mjs
+// (write-denied) and symlinks ~/.local/bin/information-guard-sandbox to it.
+// The repo source is editable but inert — edits only take effect after
+// re-running install.sh from a human terminal. ~/.local/bin is also
+// write-denied (in SENSITIVE_DOTFILES), so the symlink itself can't be
+// repointed by a sandboxed agent.
 
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -52,21 +55,44 @@ const CONFIG_PATH =
   join(homedir(), ".config", "information-guard", "sandbox.json");
 
 // Dotfiles agents may never write, even though dotfiles are writable in
-// general: credentials, shell startup (persistence), and the guard's own
-// config and git hooks. Stable across agents and years, unlike per-agent
-// state-dir allowlists.
+// general (the dotfile allow-regex covers tool state like ~/.npm, ~/.claude).
+// These win over the allow because they're persistence vectors (shell startup,
+// PATH executables that run as you) or credentials/tamper targets. Stable
+// across agents and years, unlike per-agent state-dir allowlists.
+// Write-deny only (file-write*); reads are unaffected — agents can still
+// exec tools in ~/.local/bin or read ~/.aws/credentials. For read-protection,
+// add paths to protectedPaths in sandbox.json instead.
 const SENSITIVE_DOTFILES = [
-  "~/.ssh",
-  "~/.gitconfig", // core.hooksPath — git-guard integrity
-  "~/.config/git", // the git-guard hooks themselves
-  "~/.config/information-guard", // this guard's config
+  // Shell startup (persistence via sourced rc files)
   "~/.zshrc",
+  "~/.zshrc.backup",
   "~/.zprofile",
   "~/.zshenv",
   "~/.zlogin",
   "~/.bashrc",
   "~/.bash_profile",
   "~/.profile",
+  // Credentials and secrets
+  "~/.ssh",
+  "~/.aws",
+  "~/.netrc",
+  "~/.gnupg",
+  "~/.docker",
+  "~/.config/gh", // gh auth tokens (hosts.yml)
+  "~/.tinfoil",
+  // Git integrity (hooks, identity)
+  "~/.gitconfig", // core.hooksPath — git-guard integrity
+  "~/.config/git", // the git-guard hooks themselves
+  // The guard itself (config + copied source after install)
+  "~/.config/information-guard",
+  // PATH executables (run-as-you, unsandboxed — prevents command shadowing)
+  "~/.local/bin",
+  "~/.bun/bin",
+  "~/.cargo/bin",
+  "~/.foundry/bin",
+  "~/.nebius/bin",
+  "~/.nvm", // node version manager (write-deny; running node still works)
+  "~/.pyenv", // python version manager (same)
 ];
 
 // Expand ~ in paths

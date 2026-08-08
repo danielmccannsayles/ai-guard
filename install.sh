@@ -21,12 +21,16 @@ echo ""
 
 mkdir -p "$INFORMATION_GUARD_DIR" "$GIT_HOOKS_DIR" "$LOCAL_BIN"
 
-# Git hooks
-chmod +x "$REPO_DIR/git-guard/hook.sh"
-ln -sf "$REPO_DIR/git-guard/hook.sh" "$GIT_HOOKS_DIR/pre-commit"
-ln -sf "$REPO_DIR/git-guard/hook.sh" "$GIT_HOOKS_DIR/pre-push"
+# Git hooks (copied into the write-protected config dir, not symlinked to the repo —
+# a symlink target would be writable by sandboxed agents working in ~/Desktop/coding)
+# rm -f first: the previous install may have left symlinks, and cp errors with
+# "are identical (not copied)" when dest is a symlink to the source.
+rm -f "$GIT_HOOKS_DIR/pre-commit" "$GIT_HOOKS_DIR/pre-push"
+cp "$REPO_DIR/git-guard/hook.sh" "$GIT_HOOKS_DIR/pre-commit"
+cp "$REPO_DIR/git-guard/hook.sh" "$GIT_HOOKS_DIR/pre-push"
+chmod +x "$GIT_HOOKS_DIR/pre-commit" "$GIT_HOOKS_DIR/pre-push"
 git config --global core.hooksPath "$GIT_HOOKS_DIR"
-echo "✓ git hooks → $GIT_HOOKS_DIR/"
+echo "✓ git hooks → $GIT_HOOKS_DIR/ (copied, not symlinked)"
 
 # Default config (don't overwrite existing)
 for f in repos.txt sandbox.json; do
@@ -40,10 +44,13 @@ for f in repos.txt sandbox.json; do
   fi
 done
 
-# Sandbox wrapper
-chmod +x "$REPO_DIR/sandbox/sandbox.mjs"
-ln -sf "$REPO_DIR/sandbox/sandbox.mjs" "$LOCAL_BIN/information-guard-sandbox"
-echo "✓ information-guard-sandbox → $LOCAL_BIN/"
+# Sandbox wrapper (copied into the write-protected config dir, not symlinked to the
+# repo — the repo source is writable by sandboxed agents; the config dir is SENSITIVE)
+rm -f "$INFORMATION_GUARD_DIR/sandbox.mjs"
+cp "$REPO_DIR/sandbox/sandbox.mjs" "$INFORMATION_GUARD_DIR/sandbox.mjs"
+chmod +x "$INFORMATION_GUARD_DIR/sandbox.mjs"
+ln -sf "$INFORMATION_GUARD_DIR/sandbox.mjs" "$LOCAL_BIN/information-guard-sandbox"
+echo "✓ information-guard-sandbox → $LOCAL_BIN/ (→ $INFORMATION_GUARD_DIR/sandbox.mjs, copied)"
 
 echo ""
 echo "Done. Add aliases to your shell config:"
